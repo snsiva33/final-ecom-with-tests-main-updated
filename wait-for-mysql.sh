@@ -1,29 +1,61 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 
-# derive host/port from SPRING_DATASOURCE_URL if possible
-DBURL="${SPRING_DATASOURCE_URL:-}"
-if echo "$DBURL" | grep -q "jdbc:postgresql"; then
-  DB_HOST=$(echo "$DBURL" | sed -n 's#jdbc:postgresql://\([^:/]*\).*#\1#p')
-  DB_PORT=$(echo "$DBURL" | sed -n 's#jdbc:postgresql://[^:]*:\?\([0-9]*\).*#\1#p')
-  [ -z "$DB_PORT" ] && DB_PORT=5432
+# Accept derived host:port from SPRING_DATASOURCE_URL or env
+DB_URL="${SPRING_DATASOURCE_URL:-${SPRING_DATASOURCE_URL}}"
+
+# If SPRING_DATASOURCE_URL is jdbc:postgresql://host:5432/dbname, extract host and port
+# Supports formats: jdbc:postgresql://host:5432/dbname or host:5432
+if [[ "$DB_URL" =~ jdbc: ]]; then
+  # extract host:port
+  hostport=$(echo "$DB_URL" | sed -E 's#jdbc:postgresql://([^/]+)/.*#\1#')
 else
-  DB_HOST="${DB_HOST:-localhost}"
-  DB_PORT="${DB_PORT:-5432}"
+  hostport="$DB_URL"
 fi
 
-echo "Waiting for DB at $DB_HOST:$DB_PORT (derived from SPRING_DATASOURCE_URL)"
-COUNT=0
-while ! nc -z "$DB_HOST" "$DB_PORT"; do
-  COUNT=$((COUNT+1))
-  echo "Waiting for DB ($COUNT) $DB_HOST:$DB_PORT..."
-  sleep 2
-  if [ $COUNT -gt 30 ]; then
-    echo "Timeout waiting for DB $DB_HOST:$DB_PORT"
+# Default timeout seconds
+TIMEOUT=${WAIT_TIMEOUT:-60}
+SLEEP_INTERVAL=${WAIT_INTERVAL:-2}
+
+if [[ -z "$hostport" ]]; then
+  echo "Waiting for DB at <unknown host> (SPRING_DATASOURCE_URL not set)"
+  exit 1
+fi
+
+HOST=$(echo "$hostport" | cut -d: -f1)
+PORT=$(echo "$hostport" | cut -d: -f2)
+if [[ -z "$PORT" ]]; then
+  PORT=5432
+fi
+
+echo "Waiting for DB at $HOST:$PORT (derived from SPRING_DATASOURCE_URL)"
+
+start_ts=$(date +%s)
+while true; do
+  # try nc if available
+  if command -v nc >/dev/null 2>&1; then
+    if nc -z "$HOST" "$PORT" >/dev/null 2>&1; then
+      echo "DB reachable, starting app..."
+      break
+    fi
+  else
+    # fallback: use bash /dev/tcp
+    if (echo > /dev/tcp/"$HOST"/"$PORT") >/dev/null 2>&1; then
+      echo "DB reachable (via /dev/tcp), starting app..."
+      break
+    fi
+  fi
+
+  now=$(date +%s)
+  elapsed=$((now - start_ts))
+  if [[ "$elapsed" -ge "$TIMEOUT" ]]; then
+    echo "Timeout waiting for DB $HOST:$PORT"
     exit 1
   fi
+
+  echo "Waiting for DB ($elapsed) $HOST:$PORT..."
+  sleep "$SLEEP_INTERVAL"
 done
 
-echo "DB reachable, starting app..."
-# exec the java command so it becomes PID 1 (foreground) and logs appear in Render UI
-exec "$@"
+# finally run the jar
+exec java -jar /app/app.jar

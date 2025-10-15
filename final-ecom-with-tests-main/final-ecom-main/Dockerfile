@@ -1,19 +1,16 @@
-# Dockerfile
-FROM maven:3.9.4-eclipse-temurin-17 AS build
-WORKDIR /build
-COPY pom.xml .
-RUN mvn -B -f pom.xml dependency:go-offline
-COPY src ./src
-RUN mvn -B -DskipTests package
-
+# if you're using a multi-stage Dockerfile, add this in the runtime stage
 FROM eclipse-temurin:17-jre-jammy
-WORKDIR /app
-# install netcat for readiness probe
-RUN apt-get update && apt-get install -y netcat && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /build/target/*.jar app.jar
+# install netcat (nc) and bash (if you need bash)
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends netcat-openbsd bash \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY app.jar app.jar
 COPY wait-for-mysql.sh /app/wait-for-mysql.sh
 RUN chmod +x /app/wait-for-mysql.sh
 
-EXPOSE 8080
-ENTRYPOINT ["/app/wait-for-mysql.sh"]
+# keep existing entrypoint/cmd
+CMD ["/app/wait-for-mysql.sh"]
