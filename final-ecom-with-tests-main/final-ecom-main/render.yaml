@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ekart-backend
+    env: docker
+    plan: free
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: SPRING_DATASOURCE_URL
+        value: jdbc:mysql://{render-postgres-host}:{port}/ekartdb
+      - key: SPRING_DATASOURCE_USERNAME
+        value: root
+      - key: SPRING_DATASOURCE_PASSWORD
+        value: rootpassword
+    buildCommand: ./mvnw -B -DskipTests package
+    startCommand: java -jar target/*.jar
