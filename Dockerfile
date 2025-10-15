@@ -19,15 +19,13 @@ RUN set -eux; \
     echo "Building with POM: $POM"; \
     mvn -B -f "$POM" -DskipTests package
 
+# final stage (example)
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
-RUN apt-get update && apt-get install -y netcat && rm -rf /var/lib/apt/lists/*
 
-# copy jar (first matching jar)
 COPY --from=build /build/**/target/*.jar app.jar
-
 COPY wait-for-mysql.sh /app/wait-for-mysql.sh
 RUN chmod +x /app/wait-for-mysql.sh
 
-EXPOSE 8080
-ENTRYPOINT ["/app/wait-for-mysql.sh"]
+# use sh -c so the script can exec the java command and keep logs visible
+ENTRYPOINT ["sh", "-c", "/app/wait-for-mysql.sh java -jar /app/app.jar"]
